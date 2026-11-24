@@ -33,7 +33,7 @@ fi
 # CUDA libs are deliberately NOT bundled (they are the optional GPU pack): build without LD_LIBRARY_PATH
 env -u LD_LIBRARY_PATH $PY -m PyInstaller --noconfirm --clean --windowed --name LiveTranscriber \
   --collect-all faster_whisper --collect-all ctranslate2 --collect-all onnxruntime \
-  --collect-all sherpa_onnx --collect-all onnx_asr --collect-binaries av \
+  --collect-all sherpa_onnx --collect-all onnx_asr --collect-binaries av --collect-data certifi \
   --copy-metadata onnx-asr --copy-metadata huggingface-hub --copy-metadata faster-whisper \
   --copy-metadata ctranslate2 --copy-metadata onnxruntime-gpu --copy-metadata sherpa-onnx \
   --exclude-module torch --exclude-module matplotlib --exclude-module tensorboard \

@@ -2,12 +2,18 @@
 import ctypes, os, sys, threading, time, urllib.request
 
 WIN = sys.platform == "win32"
-try:  # use the bundled CA list so downloads work even on systems without a certificate store
-    import certifi
-    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
-    os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
-except Exception:
-    pass
+if not WIN and not os.environ.get("SSL_CERT_FILE"):
+    # Linux: use the system CA bundle when there is one (respects corporate/custom roots);
+    # only on minimal systems without ca-certificates fall back to the bundled certifi list.
+    _SYSTEM_CA = ("/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt",
+                  "/etc/ssl/ca-bundle.pem", "/etc/ssl/cert.pem", "/etc/pki/tls/cert.pem",
+                  "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem")
+    if not any(os.path.exists(p) for p in _SYSTEM_CA):
+        try:
+            import certifi
+            os.environ["SSL_CERT_FILE"] = certifi.where()
+        except Exception:
+            pass
 APP_DIR = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
 BASE_DIR = getattr(sys, "_MEIPASS", APP_DIR)
 if WIN:
