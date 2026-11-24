@@ -12,3 +12,7 @@ models-src/
 Transcripts/
 
 build.out.txt
+dist-linux/
+release.out.txt
+docker-build.out.txt
+linux-test.out.txt

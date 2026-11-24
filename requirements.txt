@@ -5,7 +5,7 @@ onnx-asr>=0.12
 onnxruntime-gpu>=1.22,<1.24     # also runs on CPU when CUDA isn't available (see note in build.ps1)
 huggingface_hub>=0.24
 sherpa-onnx>=1.10
-PyAudioWPatch>=0.2.12
+PyAudioWPatch>=0.2.12; sys_platform == "win32"     # Windows audio (WASAPI loopback); Linux uses parec, see audio.py
 numpy>=1.26
 scipy>=1.11
 # Build

@@ -28,8 +28,23 @@ def _crash_log(exc_type, exc, tb):
 sys.excepthook = _crash_log
 
 import numpy as np
-import pyaudiowpatch as pyaudio
+import audio
 from scipy.signal import resample_poly
+
+IS_WIN = sys.platform == "win32"
+UI_FONT = "Segoe UI" if IS_WIN else "DejaVu Sans"
+MONO_FONT = "Consolas" if IS_WIN else "DejaVu Sans Mono"
+
+
+def open_folder(path):
+    """Open a folder in the system file manager."""
+    if not os.path.isdir(path):
+        return
+    if IS_WIN:
+        os.startfile(path)
+    else:
+        import subprocess
+        subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 SR = 16000
 SILENCE_END, MAX_SEG, MIN_SEG, PREROLL = 0.8, 25.0, 0.4, 0.3
@@ -46,23 +61,6 @@ def to16k(raw, rate, ch):
         fr = Fraction(SR, int(rate)).limit_denominator(1000)
         x = resample_poly(x, fr.numerator, fr.denominator).astype(np.float32)
     return x
-
-
-def list_devices():
-    pa = pyaudio.PyAudio()
-    try:
-        wasapi = pa.get_host_api_info_by_type(pyaudio.paWASAPI)
-        mics, loops = [], []
-        for i in range(pa.get_device_count()):
-            d = pa.get_device_info_by_index(i)
-            if d["hostApi"] != wasapi["index"] or d["maxInputChannels"] < 1:
-                continue
-            (loops if d.get("isLoopbackDevice") else mics).append(d)
-        dm = pa.get_device_info_by_index(wasapi["defaultInputDevice"])
-        dl = pa.get_default_wasapi_loopback()
-        return mics, loops, dm["index"], dl["index"]
-    finally:
-        pa.terminate()
 
 
 class Engine:
@@ -139,21 +137,16 @@ class Engine:
                 self.diar = Diarizer(mp, threshold=self.thresh)
             except Exception as e:
                 self.post("info", f"Speaker detection unavailable: {e}")
-        self.pa = pyaudio.PyAudio()
-        self.streams = [self._source("MIC", self.pa.get_device_info_by_index(self.mic_idx)),
-                        self._source("SYS", self.pa.get_device_info_by_index(self.loop_idx))]
+        self.streams = [self._source("MIC", self.mic_idx), self._source("SYS", self.loop_idx)]
         threading.Thread(target=self._transcriber, daemon=True).start()
         self.post("running", dev)
 
     def stop(self):
         self.stop_ev.set()
         for s in self.streams:
-            try:
-                s.stop_stream(); s.close()
-            except Exception:
-                pass
+            s.close()
         try:
-            self.pa and self.pa.terminate()
+            audio.shutdown()
         except Exception:
             pass
 
@@ -205,16 +198,9 @@ class Engine:
             self.post("line", ts, label, text, sid, spk)  # empty text just clears the live line
 
     def _source(self, label, dev):
-        rate, ch = int(dev["defaultSampleRate"]), int(dev["maxInputChannels"])
         q = queue.Queue()
-
-        def cb(data, frames, ti, status):
-            q.put(data)
-            return (None, pyaudio.paContinue)
-
-        stream = self.pa.open(format=pyaudio.paFloat32, channels=ch, rate=rate, input=True,
-                              input_device_index=dev["index"], frames_per_buffer=int(rate * 0.03),
-                              stream_callback=cb)
+        stream = audio.open_input(dev, q.put)
+        rate, ch = stream.rate, stream.ch
 
         def emit(buf, t0):
             a = np.concatenate(buf)
@@ -276,17 +262,23 @@ class App(tk.Tk):
         self.geometry("980x560+60+10"); self.minsize(720, 440)
         self.configure(bg=BG)
         self.engine = None
-        self.names, self.spk_tags = {}, set()
+        self.names, self.spk_tags, self.dev_ids = {}, set(), {}
         self.ui_q = queue.Queue()
         self.levels = {"MIC": 0.0, "SYS": 0.0}
         self._style()
         self._build()
         try:
-            self.mics, self.loops, dm, dl = list_devices()
-            self.mic_cb["values"] = [f"{d['index']}: {d['name']}" for d in self.mics]
-            self.loop_cb["values"] = [f"{d['index']}: {d['name']}" for d in self.loops]
-            self.mic_cb.set(next(v for v in self.mic_cb["values"] if v.startswith(f"{dm}:")))
-            self.loop_cb.set(next(v for v in self.loop_cb["values"] if v.startswith(f"{dl}:")))
+            mics, loops, dm, dl = audio.list_devices()
+            self.dev_ids = {}   # display text -> device id (ints on Windows, source names on Linux)
+            def show(devs):
+                out = []
+                for d in devs:
+                    label = d["name"] if d["name"] not in self.dev_ids else f"{d['name']} ({d['id']})"
+                    self.dev_ids[label] = d["id"]; out.append(label)
+                return out
+            self.mic_cb["values"], self.loop_cb["values"] = show(mics), show(loops)
+            self.mic_cb.set(next(k for k, v in self.dev_ids.items() if v == dm and k in self.mic_cb["values"]))
+            self.loop_cb.set(next(k for k, v in self.dev_ids.items() if v == dl and k in self.loop_cb["values"]))
         except Exception as e:
             messagebox.showerror("Audio", f"Could not list audio devices:\n{e}")
         self.protocol("WM_DELETE_WINDOW", self._close)
@@ -296,14 +288,14 @@ class App(tk.Tk):
 
     def _style(self):
         s = ttk.Style(self); s.theme_use("clam")
-        s.configure(".", background=BG, foreground=FG, fieldbackground=PANEL, font=("Segoe UI", 10))
+        s.configure(".", background=BG, foreground=FG, fieldbackground=PANEL, font=(UI_FONT, 10))
         s.configure("TCombobox", fieldbackground=PANEL, background=PANEL, foreground=FG, arrowcolor=FG)
         s.map("TCombobox", fieldbackground=[("readonly", PANEL)], foreground=[("readonly", FG)])
         s.configure("TLabel", background=BG, foreground=MUTED)
         s.configure("TCheckbutton", background=BG, foreground=FG)
-        s.configure("Go.TButton", background=ACCENT, foreground="white", padding=(18, 7), font=("Segoe UI", 10, "bold"), borderwidth=0)
+        s.configure("Go.TButton", background=ACCENT, foreground="white", padding=(18, 7), font=(UI_FONT, 10, "bold"), borderwidth=0)
         s.map("Go.TButton", background=[("active", "#2563eb")])
-        s.configure("Stop.TButton", background="#dc2626", foreground="white", padding=(18, 7), font=("Segoe UI", 10, "bold"), borderwidth=0)
+        s.configure("Stop.TButton", background="#dc2626", foreground="white", padding=(18, 7), font=(UI_FONT, 10, "bold"), borderwidth=0)
         s.map("Stop.TButton", background=[("active", "#b91c1c")])
         s.configure("TButton", background=PANEL, foreground=FG, padding=(10, 5), borderwidth=0)
         s.map("TButton", background=[("active", "#2a2f38")])
@@ -346,25 +338,25 @@ class App(tk.Tk):
         tk.Entry(sv, textvariable=self.dir_var, bg=PANEL, fg=FG, insertbackground=FG, relief="flat",
                  highlightthickness=0).pack(side="left", fill="x", expand=True, padx=8, ipady=4)
         ttk.Button(sv, text="Browse", command=self._browse).pack(side="left", padx=(0, 6))
-        ttk.Button(sv, text="Open folder", command=lambda: os.startfile(self.dir_var.get()) if os.path.isdir(self.dir_var.get()) else None).pack(side="left")
+        ttk.Button(sv, text="Open folder", command=lambda: open_folder(self.dir_var.get())).pack(side="left")
 
         body = tk.Frame(self, bg=PANEL); body.pack(fill="both", expand=True, padx=16, pady=(0, 6))
         self.txt = tk.Text(body, bg=PANEL, fg=FG, wrap="word", relief="flat", padx=14, pady=10,
-                           font=("Segoe UI", 11), spacing3=6, state="disabled", highlightthickness=0, height=6)
+                           font=(UI_FONT, 11), spacing3=6, state="disabled", highlightthickness=0, height=6)
         sb = ttk.Scrollbar(body, command=self.txt.yview); self.txt.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y"); self.txt.pack(fill="both", expand=True)
-        self.txt.tag_configure("ts", foreground=MUTED, font=("Consolas", 9))
-        self.txt.tag_configure("MIC", foreground=C_MIC, font=("Segoe UI", 9, "bold"))
-        self.txt.tag_configure("SYS", foreground=C_SYS, font=("Segoe UI", 9, "bold"))
-        self.txt.tag_configure("info", foreground=MUTED, font=("Segoe UI", 9, "italic"))
+        self.txt.tag_configure("ts", foreground=MUTED, font=(MONO_FONT, 9))
+        self.txt.tag_configure("MIC", foreground=C_MIC, font=(UI_FONT, 9, "bold"))
+        self.txt.tag_configure("SYS", foreground=C_SYS, font=(UI_FONT, 9, "bold"))
+        self.txt.tag_configure("info", foreground=MUTED, font=(UI_FONT, 9, "italic"))
 
         live = tk.Frame(self, bg=PANEL); live.pack(fill="x", padx=16, pady=(0, 6))
         self.live_var, self.live_lbl, self.done = {}, {}, {"MIC": 0, "SYS": 0}
         for name, color in (("MIC", C_MIC), ("SYS", C_SYS)):
             row = tk.Frame(live, bg=PANEL); row.pack(fill="x", padx=14, pady=(6, 0))
-            tk.Label(row, text=name, bg=PANEL, fg=color, font=("Segoe UI", 9, "bold"), width=4, anchor="w").pack(side="left")
+            tk.Label(row, text=name, bg=PANEL, fg=color, font=(UI_FONT, 9, "bold"), width=4, anchor="w").pack(side="left")
             self.live_var[name] = tk.StringVar(value="")
-            lb = tk.Label(row, textvariable=self.live_var[name], bg=PANEL, fg=MUTED, font=("Segoe UI", 11, "italic"),
+            lb = tk.Label(row, textvariable=self.live_var[name], bg=PANEL, fg=MUTED, font=(UI_FONT, 11, "italic"),
                           anchor="w", justify="left", wraplength=820)
             lb.pack(side="left", fill="x", expand=True); self.live_lbl[name] = lb
         tk.Frame(live, bg=PANEL, height=6).pack()
@@ -393,7 +385,7 @@ class App(tk.Tk):
         tag = f"spk{spk}"
         if tag not in self.spk_tags:
             self.spk_tags.add(tag)
-            self.txt.tag_configure(tag, foreground=SPK_COLORS[spk % len(SPK_COLORS)], font=("Segoe UI", 10, "bold"))
+            self.txt.tag_configure(tag, foreground=SPK_COLORS[spk % len(SPK_COLORS)], font=(UI_FONT, 10, "bold"))
             self.txt.tag_bind(tag, "<Double-Button-1>", lambda e, s=spk: self._rename(s))
             self.txt.tag_bind(tag, "<Enter>", lambda e: self.txt.configure(cursor="hand2"))
             self.txt.tag_bind(tag, "<Leave>", lambda e: self.txt.configure(cursor=""))
@@ -432,7 +424,7 @@ class App(tk.Tk):
         if self.engine:
             self._stop(); return
         try:
-            mic = int(self.mic_cb.get().split(":")[0]); lp = int(self.loop_cb.get().split(":")[0])
+            mic = self.dev_ids[self.mic_cb.get()]; lp = self.dev_ids[self.loop_cb.get()]
         except Exception:
             messagebox.showerror("Audio", "Pick a microphone and system-audio device."); return
         d = self.dir_var.get()

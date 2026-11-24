@@ -1,6 +1,6 @@
 # Live Transcriber
 
-Real-time, **fully local** speech-to-text for Windows. It listens to your **microphone** *and* to **whatever you hear** (meeting audio, video, calls), transcribes both live, tells the people in a meeting apart, and saves everything to a text file. Nothing is sent to any cloud service.
+Real-time, **fully local** speech-to-text for **Windows and Linux**. It listens to your **microphone** *and* to **whatever you hear** (meeting audio, video, calls), transcribes both live, tells the people in a meeting apart, and saves everything to a text file. Nothing is sent to any cloud service.
 
 - **Two sources at once:** `MIC` (you) and `SYS` (the other side of the call / any audio playing on your PC)
 - **Live streaming text:** words appear while someone is still speaking, then the line is committed
@@ -18,7 +18,19 @@ Windows SmartScreen may warn about an unsigned app the first time: *More info �
 
 **Requirements:** Windows 10/11, 64-bit. About 3 GB free RAM. Roughly 1 GB disk for the CPU model (≈ 3 GB if you use the GPU model).
 
-### Optional: NVIDIA GPU acceleration
+### Linux
+1. Download **`LiveTranscriber-linux-x86_64.tar.gz`** from the [Releases](../../releases/latest) page, then:
+   ```bash
+   tar xzf LiveTranscriber-linux-x86_64.tar.gz
+   ./LiveTranscriber/LiveTranscriber
+   ```
+2. Press **Start**. First run downloads the models into `~/.local/share/LiveTranscriber/models` (same sizes as Windows). Transcripts default to `~/Documents/LiveTranscriber`.
+
+**Requirements:** x86-64 Linux with glibc 2.35 or newer (Ubuntu 22.04+, Debian 12+, Fedora 36+ and similar), a desktop session, and **PulseAudio or PipeWire** with the `pactl` and `parec` tools (Debian/Ubuntu: `sudo apt install pulseaudio-utils`; on PipeWire systems also install `pipewire-pulse`). The app lists your sources automatically: *Microphone* shows real inputs and *System audio* shows the **"Monitor of …"** sources, which carry whatever is playing on that output. If you hear nothing in `SYS`, pick the monitor of the output you are actually using.
+
+For the optional NVIDIA GPU pack on Linux use **`LiveTranscriber-linux-gpu-pack.tar.gz`**: extract it **into the app folder** (`tar xzf ... -C LiveTranscriber`) so you get `LiveTranscriber/cuda/*.so*`. The app restarts itself once with the right library path when it finds the pack. *(The Linux GPU pack has not been tested on real NVIDIA hardware yet; CPU is the tested path.)*
+
+### Optional: NVIDIA GPU acceleration (Windows)
 If you have an NVIDIA GPU with a recent driver:
 
 1. Download **`LiveTranscriber-gpu-pack.zip`** from the same release.
@@ -48,7 +60,7 @@ The grey strip under the transcript is the **live** text of whoever is currently
 Tip: use a **headset**. With speakers, your microphone also hears the meeting, so the same line shows up under both `MIC` and `SYS`.
 
 ### Limitations
-- Windows only (uses WASAPI loopback).
+- Windows 10/11 (WASAPI loopback) and x86-64 Linux (PulseAudio/PipeWire). No macOS build.
 - Speaker identification is a best effort, based on voiceprints of each sentence. Very short utterances ("yeah", "okay") are attributed to the previous speaker, people interrupting each other without a pause end up in one line, and similar voices can be merged. Adjust the slider if needed.
 - The log keeps the names that were current when each line was written; renaming a speaker updates the on-screen text and later log lines.
 - Only English for `parakeet-v2`; for other languages use `parakeet-v3` or Whisper.
@@ -59,11 +71,17 @@ Audio is processed entirely on your computer. The app connects to the internet o
 
 ## Troubleshooting
 - **Nothing appears for `SYS`:** make sure *System audio* is the loopback of the device you are actually listening on, and that something is playing.
-- **Crashes / errors:** details are written to `%LOCALAPPDATA%\LiveTranscriber\app.log`.
-- **Re-download a model:** delete its folder in `%LOCALAPPDATA%\LiveTranscriber\models`.
+- **Crashes / errors:** details are written to `%LOCALAPPDATA%\LiveTranscriber\app.log` (Linux: `~/.local/share/LiveTranscriber/app.log`).
+- **Re-download a model:** delete its folder in `%LOCALAPPDATA%\LiveTranscriber\models` (Linux: `~/.local/share/LiveTranscriber/models`).
+- **Linux, "No PulseAudio/PipeWire sources found":** install `pulseaudio-utils` and make sure a sound server is running (`pactl info` should work).
 - **Slow on CPU:** try the `parakeet-v2` model (fastest on CPU) or a smaller Whisper model, or add the GPU pack.
 
 ## Build from source
+Linux (build on the oldest distro you want to support; needs `python3-venv python3-tk binutils`):
+```bash
+./build.sh                # -> dist/LiveTranscriber-linux-x86_64.tar.gz   (add --gpu-pack for the optional GPU pack)
+```
+Windows:
 ```powershell
 git clone <this repo>
 cd live-transcriber
