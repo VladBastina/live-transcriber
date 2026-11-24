@@ -1,0 +1,12 @@
+# Runtime
+faster-whisper>=1.1
+onnx-asr>=0.12
+# 1.22/1.23 use CUDA 12 (same as faster-whisper's ctranslate2). 1.24+ switched to CUDA 13, which needs a very new NVIDIA driver.
+onnxruntime-gpu>=1.22,<1.24     # also runs on CPU when CUDA isn't available (see note in build.ps1)
+huggingface_hub>=0.24
+sherpa-onnx>=1.10
+PyAudioWPatch>=0.2.12
+numpy>=1.26
+scipy>=1.11
+# Build
+pyinstaller>=6.6

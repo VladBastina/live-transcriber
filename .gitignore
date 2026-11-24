@@ -1,0 +1,14 @@
+.venv*/
+build/
+dist/
+__pycache__/
+*.pyc
+*.spec
+models/
+models-src/
+# never commit recordings or transcripts
+*.log
+*.wav
+Transcripts/
+
+build.out.txt
